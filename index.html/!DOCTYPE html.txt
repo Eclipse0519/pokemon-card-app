@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>PokéVault - Card Collector & Scanner</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script>
+    tailwind.config = { darkMode: 'class' };
+  </script>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen font-sans pb-20">
+
+  <!-- Header -->
+  <header class="bg-slate-800 border-b border-slate-700 sticky top-0 z-50 px-4 py-3 flex justify-between items-center shadow-lg">
+    <div class="flex items-center gap-2">
+      <div class="w-8 h-8 bg-red-600 rounded-full border-2 border-white flex items-center justify-center shadow">
+        <div class="w-3 h-3 bg-white rounded-full border border-slate-800"></div>
+      </div>
+      <h1 class="font-bold text-xl tracking-wide bg-gradient-to-r from-red-500 to-amber-400 bg-clip-text text-transparent">
+        PokéVault
+      </h1>
+    </div>
+    <div class="text-right">
+      <div class="text-xs text-slate-400">Portfolio Value</div>
+      <div id="totalValue" class="text-base font-bold text-emerald-400">$0.00</div>
+    </div>
+  </header>
+
+  <!-- Main View Area -->
+  <main class="max-w-md mx-auto p-4 space-y-6">
+
+    <!-- TAB 1: COLLECTION -->
+    <section id="tab-collection" class="space-y-4">
+      <div class="flex justify-between items-center">
+        <h2 class="text-lg font-semibold">My Binder</h2>
+        <span id="cardCount" class="text-xs bg-slate-800 px-2.5 py-1 rounded-full border border-slate-700 text-slate-300">
+          0 Cards
+        </span>
+      </div>
+      
+      <div id="emptyState" class="text-center py-12 border-2 border-dashed border-slate-800 rounded-2xl p-6">
+        <p class="text-slate-400 text-sm">Your binder is empty!</p>
+        <p class="text-slate-500 text-xs mt-1">Use Search or Video Scanner to add cards.</p>
+      </div>
+
+      <div id="collectionGrid" class="grid grid-cols-2 gap-3"></div>
+    </section>
+
+    <!-- TAB 2: SEARCH & PRICES -->
+    <section id="tab-search" class="space-y-4 hidden">
+      <h2 class="text-lg font-semibold">Search Market</h2>
+      <div class="flex gap-2">
+        <input id="searchInput" type="text" placeholder="Card name (e.g., Charizard, Gengar)" 
+          class="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-red-500" />
+        <button onclick="searchCards()" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl text-sm font-medium transition">
+          Search
+        </button>
+      </div>
+
+      <div id="searchResults" class="grid grid-cols-2 gap-3"></div>
+    </section>
+
+    <!-- TAB 3: VIDEO SCANNER -->
+    <section id="tab-scanner" class="space-y-4 hidden">
+      <h2 class="text-lg font-semibold">Live Pack Scanner</h2>
+      <p class="text-xs text-slate-400">Position card set number (e.g. 025/198) in front of the camera.</p>
+      
+      <div class="relative bg-black rounded-2xl overflow-hidden aspect-[3/4] border border-slate-700">
+        <video id="videoFeed" class="w-full h-full object-cover" autoplay playsinline muted></video>
+        <div class="absolute inset-0 border-2 border-red-500/50 rounded-2xl pointer-events-none flex items-center justify-center">
+          <div class="w-3/4 h-24 border-2 border-dashed border-red-400/80 rounded-lg flex items-center justify-center">
+            <span class="text-xs text-red-300 bg-black/60 px-2 py-1 rounded">Align Set # Here</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex gap-2">
+        <button id="startCamBtn" onclick="startCamera()" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-xl text-sm font-medium">
+          Start Camera
+        </button>
+        <button id="scanBtn" onclick="scanFrame()" class="flex-1 bg-slate-800 border border-slate-700 text-slate-300 py-2.5 rounded-xl text-sm font-medium" disabled>
+          Scan Card
+        </button>
+      </div>
+      <p id="scanStatus" class="text-xs text-center text-slate-400"></p>
+    </section>
+
+  </main>
+
+  <!-- Bottom Navigation Bar -->
+  <nav class="fixed bottom-0 left-0 right-0 bg-slate-800/90 backdrop-blur-md border-t border-slate-700 p-2 flex justify-around max-w-md mx-auto">
+    <button onclick="switchTab('collection')" class="nav-btn text-red-400 text-xs flex flex-col items-center gap-1">
+      <span class="text-lg">🎴</span> Collection
+    </button>
+    <button onclick="switchTab('search')" class="nav-btn text-slate-400 text-xs flex flex-col items-center gap-1">
+      <span class="text-lg">🔍</span> Search
+    </button>
+    <button onclick="switchTab('scanner')" class="nav-btn text-slate-400 text-xs flex flex-col items-center gap-1">
+      <span class="text-lg">📷</span> Scanner
+    </button>
+  </nav>
+
+  <script>
+    let myCollection = JSON.parse(localStorage.getItem('myPokeBinder') || '[]');
+
+    function saveCollection() {
+      localStorage.setItem('myPokeBinder', JSON.stringify(myCollection));
+      renderCollection();
+    }
+
+    function switchTab(tab) {
+      ['collection', 'search', 'scanner'].forEach(t => {
+        document.getElementById(`tab-${t}`).classList.toggle('hidden', t !== tab);
+      });
+    }
+
+    async function searchCards() {
+      const query = document.getElementById('searchInput').value.trim();
+      if (!query) return;
+      const resultsDiv = document.getElementById('searchResults');
+      resultsDiv.innerHTML = '<p class="col-span-2 text-center text-xs text-slate-400 py-4">Searching market...</p>';
+      
+      try {
+        const res = await fetch(`https://api.pokemontcg.io/v2/cards?q=name:"${query}*"&pageSize=10`);
+        const data = await res.json();
+        
+        resultsDiv.innerHTML = data.data.map(card => {
+          const price = card.tcgplayer?.prices?.holofoil?.market || card.tcgplayer?.prices?.normal?.market || '0.00';
+          return `
+            <div class="bg-slate-800 border border-slate-700 p-2.5 rounded-xl flex flex-col justify-between">
+              <img src="${card.images.small}" class="rounded-lg mb-2 w-full object-contain h-40" />
+              <div>
+                <div class="text-xs font-bold truncate">${card.name}</div>
+                <div class="text-[10px] text-slate-400">${card.set.name} • #${card.number}</div>
+                <div class="text-xs font-semibold text-emerald-400 mt-1">$${price}</div>
+                <button onclick='addCard(${JSON.stringify({id: card.id, name: card.name, image: card.images.small, price: price, set: card.set.name}).replace(/'/g, "&apos;")})' 
+                  class="w-full mt-2 bg-red-600/20 text-red-400 border border-red-500/30 text-xs py-1 rounded-lg hover:bg-red-600 hover:text-white transition">
+                  + Add to Binder
+                </button>
+              </div>
+            </div>
+          `;
+        }).join('');
+      } catch (err) {
+        resultsDiv.innerHTML = '<p class="col-span-2 text-center text-xs text-red-400">Error fetching card data.</p>';
+      }
+    }
+
+    function addCard(card) {
+      myCollection.push(card);
+      saveCollection();
+      alert(`Added ${card.name} to your binder!`);
+    }
+
+    function renderCollection() {
+      const grid = document.getElementById('collectionGrid');
+      const empty = document.getElementById('emptyState');
+      const count = document.getElementById('cardCount');
+      const total = document.getElementById('totalValue');
+
+      count.textContent = `${myCollection.length} Cards`;
+      const val = myCollection.reduce((acc, c) => acc + (parseFloat(c.price) || 0), 0);
+      total.textContent = `$${val.toFixed(2)}`;
+
+      if (myCollection.length === 0) {
+        empty.classList.remove('hidden');
+        grid.innerHTML = '';
+        return;
+      }
+
+      empty.classList.add('hidden');
+      grid.innerHTML = myCollection.map((card, idx) => `
+        <div class="bg-slate-800 border border-slate-700 p-2.5 rounded-xl relative group">
+          <img src="${card.image}" class="rounded-lg mb-2 w-full object-contain h-40" />
+          <div class="text-xs font-bold truncate">${card.name}</div>
+          <div class="text-[10px] text-slate-400">${card.set}</div>
+          <div class="text-xs font-semibold text-emerald-400 mt-1">$${card.price}</div>
+          <button onclick="removeCard(${idx})" class="text-[10px] text-red-400 mt-2 block hover:underline">Remove</button>
+        </div>
+      `).join('');
+    }
+
+    function removeCard(idx) {
+      myCollection.splice(idx, 1);
+      saveCollection();
+    }
+
+    // Camera OCR Scanner implementation
+    let videoStream;
+    async function startCamera() {
+      try {
+        videoStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+        document.getElementById('videoFeed').srcObject = videoStream;
+        document.getElementById('scanBtn').disabled = false;
+        document.getElementById('scanStatus').textContent = "Camera active. Tap 'Scan Card'.";
+      } catch (e) {
+        document.getElementById('scanStatus').textContent = "Camera access denied or unavailable.";
+      }
+    }
+
+    async function scanFrame() {
+      const status = document.getElementById('scanStatus');
+      status.textContent = "Scanning card code...";
+      const video = document.getElementById('videoFeed');
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext('2d').drawImage(video, 0, 0);
+
+      const result = await Tesseract.recognize(canvas, 'eng');
+      status.textContent = `Detected text: "${result.data.text.trim()}" - Searching...`;
+    }
+
+    renderCollection();
+  </script>
+</body>
+</html>
